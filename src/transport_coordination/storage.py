@@ -63,6 +63,61 @@ CREATE TABLE IF NOT EXISTS audit_events (
     event_hash TEXT NOT NULL UNIQUE,
     occurred_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS versioned_documents (
+    doc_type TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK(version >= 1),
+    payload_json TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES actors(actor_id),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (doc_type, doc_id, version)
+);
+CREATE TABLE IF NOT EXISTS scenarios (
+    scenario_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    refs_json TEXT NOT NULL,
+    params_json TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES actors(actor_id),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS plans (
+    plan_id TEXT PRIMARY KEY,
+    scenario_id TEXT NOT NULL REFERENCES scenarios(scenario_id),
+    name TEXT NOT NULL,
+    department_org TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('submitted', 'approved', 'rejected', 'superseded')),
+    result_json TEXT NOT NULL,
+    result_hash TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    supersedes_plan_id TEXT REFERENCES plans(plan_id),
+    submitted_by TEXT NOT NULL REFERENCES actors(actor_id),
+    submitted_at TEXT NOT NULL,
+    decided_by TEXT REFERENCES actors(actor_id),
+    decided_at TEXT,
+    decision_note TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_approved_once
+    ON plans(scenario_id) WHERE status = 'approved';
+CREATE TABLE IF NOT EXISTS plan_reviews (
+    review_id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL REFERENCES plans(plan_id),
+    decision TEXT NOT NULL CHECK(decision IN ('approve', 'reject', 'comment', 'supersede', 'superseded')),
+    note TEXT,
+    actor_id TEXT NOT NULL REFERENCES actors(actor_id),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS plan_comparisons (
+    comparison_id TEXT PRIMARY KEY,
+    plan_a TEXT NOT NULL,
+    plan_b TEXT NOT NULL,
+    pair_key TEXT NOT NULL UNIQUE,
+    summary_json TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES actors(actor_id),
+    created_at TEXT NOT NULL
+);
 """
 
 
