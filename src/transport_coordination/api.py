@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .commute_service import CommuteService
 from .errors import DomainError, ValidationError
 from .service import DomainService
 from .storage import Database
@@ -48,11 +49,67 @@ def route(service: DomainService, method: str, path: str, body: dict[str, Any] |
             query = parse_qs(parsed.query)
             after = int(query.get("after_sequence", ["0"])[0])
             return 200, {"items": service.audit_events(after)}
+        segments = [segment for segment in parsed.path.split("/") if segment]
+        if segments and segments[0] == "commute" and isinstance(service, CommuteService):
+            return _commute_route(service, method, segments, parsed, body, actor_id)
         return 404, {"error": "route_not_found", "message": "接口不存在"}
     except DomainError as exc:
         return exc.status, {"error": exc.code, "message": str(exc)}
     except (TypeError, ValueError) as exc:
         return 400, {"error": "invalid_request", "message": str(exc)}
+
+
+def _commute_route(service: CommuteService, method: str, segments: list[str], parsed,
+                   body: dict[str, Any], actor_id: str) -> tuple[int, dict[str, Any]]:
+    """分派通勤覆盖决策相关的接口。"""
+
+    query = parse_qs(parsed.query)
+    if segments == ["commute", "scenarios"] and method == "POST":
+        receipt = service.create_scenario(actor_id=actor_id, **body)
+        return 200 if receipt.replayed else 201, receipt.__dict__
+    if segments == ["commute", "scenarios"] and method == "GET":
+        site_id = query.get("site_id", [""])[0]
+        if not site_id:
+            raise ValidationError("site_id 不能为空")
+        return 200, {"items": service.list_scenarios(site_id)}
+    if len(segments) == 3 and segments[:2] == ["commute", "scenarios"] and method == "GET":
+        return 200, service.get_scenario(segments[2])
+    if segments == ["commute", "plans"] and method == "POST":
+        receipt = service.create_plan(actor_id=actor_id, **body)
+        return 200 if receipt.replayed else 201, receipt.__dict__
+    if segments == ["commute", "plans"] and method == "GET":
+        site_id = query.get("site_id", [""])[0]
+        if not site_id:
+            raise ValidationError("site_id 不能为空")
+        return 200, {"items": service.list_plans(site_id, query.get("case_id", [None])[0],
+                                                 query.get("status", [None])[0])}
+    if len(segments) == 3 and segments[:2] == ["commute", "plans"] and method == "GET":
+        return 200, service.get_plan(segments[2])
+    if len(segments) == 4 and segments[:2] == ["commute", "plans"] \
+            and segments[3] == "submit" and method == "POST":
+        receipt = service.submit_plan(actor_id=actor_id, plan_id=segments[2], **body)
+        return 200 if receipt.replayed else 201, receipt.__dict__
+    if segments == ["commute", "compare"] and method == "GET":
+        base_plan_id = query.get("base_plan_id", [""])[0]
+        candidate_plan_id = query.get("candidate_plan_id", [""])[0]
+        if not base_plan_id or not candidate_plan_id:
+            raise ValidationError("base_plan_id 与 candidate_plan_id 不能为空")
+        return 200, service.compare_plans(base_plan_id, candidate_plan_id)
+    if segments == ["commute", "reviews"] and method == "POST":
+        receipt = service.create_review(actor_id=actor_id, **body)
+        return 200 if receipt.replayed else 201, receipt.__dict__
+    if segments == ["commute", "reviews"] and method == "GET":
+        site_id = query.get("site_id", [""])[0]
+        if not site_id:
+            raise ValidationError("site_id 不能为空")
+        return 200, {"items": service.list_reviews(site_id, query.get("status", [None])[0])}
+    if len(segments) == 3 and segments[:2] == ["commute", "reviews"] and method == "GET":
+        return 200, service.get_review(segments[2])
+    if len(segments) == 4 and segments[:2] == ["commute", "reviews"] \
+            and segments[3] == "decision" and method == "POST":
+        receipt = service.decide_review(actor_id=actor_id, review_id=segments[2], **body)
+        return 200 if receipt.replayed else 201, receipt.__dict__
+    return 404, {"error": "route_not_found", "message": "接口不存在"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -93,13 +150,13 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> int:
     """启动本地 HTTP 服务。"""
 
-    parser = argparse.ArgumentParser(description="启动技能赛训协作基础服务")
+    parser = argparse.ArgumentParser(description="启动都市圈一小时通勤协同评估服务")
     parser.add_argument("--database", default="service.sqlite3")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
     database = Database(args.database)
-    Handler.service = DomainService(database)
+    Handler.service = CommuteService(database)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     try:
         server.serve_forever()

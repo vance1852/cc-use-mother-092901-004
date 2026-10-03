@@ -63,6 +63,54 @@ CREATE TABLE IF NOT EXISTS audit_events (
     event_hash TEXT NOT NULL UNIQUE,
     occurred_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS commute_scenarios (
+    scenario_id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL REFERENCES sites(site_id),
+    base_scenario_id TEXT,
+    label TEXT NOT NULL,
+    change_type TEXT NOT NULL CHECK(change_type IN ('initial','line_suspension','extra_train','timetable_revision')),
+    change_detail_json TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL,
+    created_by TEXT NOT NULL REFERENCES actors(actor_id),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS commute_plans (
+    plan_id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL REFERENCES sites(site_id),
+    case_id TEXT NOT NULL,
+    scenario_id TEXT NOT NULL REFERENCES commute_scenarios(scenario_id),
+    title TEXT NOT NULL,
+    organization_id TEXT NOT NULL REFERENCES organizations(organization_id),
+    status TEXT NOT NULL CHECK(status IN ('draft','submitted','approved','rejected')),
+    parameters_json TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    result_hash TEXT NOT NULL,
+    coverage_ratio REAL,
+    created_by TEXT NOT NULL REFERENCES actors(actor_id),
+    created_at TEXT NOT NULL,
+    submitted_at TEXT,
+    decided_at TEXT,
+    decided_by TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS commute_one_approved_per_case
+    ON commute_plans(site_id, case_id) WHERE status='approved';
+CREATE TABLE IF NOT EXISTS commute_reviews (
+    review_id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL REFERENCES sites(site_id),
+    case_id TEXT NOT NULL,
+    base_plan_id TEXT NOT NULL REFERENCES commute_plans(plan_id),
+    candidate_plan_id TEXT NOT NULL REFERENCES commute_plans(plan_id),
+    status TEXT NOT NULL CHECK(status IN ('open','completed')),
+    comparison_json TEXT NOT NULL,
+    comparison_hash TEXT NOT NULL,
+    decision TEXT,
+    decision_note TEXT,
+    created_by TEXT NOT NULL REFERENCES actors(actor_id),
+    created_at TEXT NOT NULL,
+    decided_by TEXT,
+    decided_at TEXT
+);
 """
 
 
